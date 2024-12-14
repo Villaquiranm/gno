@@ -3,7 +3,11 @@ name: gh-pages
 
 on:
   pull_request:
-    branches: [ "master" ]
+    branches:
+      - staging
+      - master
+      - prod
+      - 'feat/*'
   workflow_dispatch:
 
 permissions:
@@ -17,19 +21,22 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ github.repository == 'gnolang/gno' }} # Alternatively, validate based on provided tokens and permissions.
+    if: ${{ github.repository == 'Villaquiranm/gno' }} # Alternatively, validate based on provided tokens and permissions.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: "cd misc/gendocs && make install gen"
+      - run: echo "GOROOT=$(go env GOROOT)" >> $GITHUB_ENV
+      - run: echo $GOROOT
       - run: "cd misc/stdlib_diff && make install gen"
-      -run | # Combine files into a single directory for deployment
+      - run: "cd misc/gendocs && make install gen"
+      - run: |
           mkdir -p output/combined
-          cp -r ./misc/gendocs/godoc/* output/combined/
-          cp -r ./misc/stdlib_diff/gnoreport/* output/combined/gnoreport
+          mkdir -p output/combined/stdlib_diff
+          cp -r misc/gendocs/godoc/* output/combined/
+          cp -r misc/stdlib_diff/stdlib_diff/* output/combined/stdlib_diff/
       - uses: actions/configure-pages@v5
         id: pages
       - uses: actions/upload-pages-artifact@v3
@@ -37,7 +44,7 @@ jobs:
           path: ./output/combined
 
   deploy:
-    if: ${{ github.repository == 'gnolang/gno' }} # Alternatively, validate based on provided tokens and permissions.
+    if: ${{ github.repository == 'Villaquiranm/gno' }} # Alternatively, validate based on provided tokens and permissions.
     runs-on: ubuntu-latest
     environment:
       name: github-pages
