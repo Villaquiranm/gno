@@ -3,7 +3,8 @@ name: gh-pages
 
 on:
   push:
-    branches: [ "master" ]
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -17,7 +18,7 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ github.repository == 'gnolang/gno' }} # Alternatively, validate based on provided tokens and permissions.
+    if: ${{ github.repository == 'villaquiranm/gno' }} # Alternatively, validate based on provided tokens and permissions.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +39,7 @@ jobs:
           path: ./pages_output
 
   deploy:
-    if: ${{ github.repository == 'gnolang/gno' }} # Alternatively, validate based on provided tokens and permissions.
+    if: ${{ github.repository == 'villaquiranm/gno' }} # Alternatively, validate based on provided tokens and permissions.
     runs-on: ubuntu-latest
     environment:
       name: github-pages
