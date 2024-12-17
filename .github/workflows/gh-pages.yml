@@ -4,7 +4,11 @@ name: gh-pages
 on:
   push:
     branches:
+      - staging
       - master
+      - prod
+      - 'feat/*'
+      - 'test/*'
   workflow_dispatch:
 
 permissions:
