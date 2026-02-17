@@ -31,6 +31,11 @@ type ResultBlock struct {
 	Block     *types.Block     `json:"block"`
 }
 
+// Single block (with meta)
+type ResultMode struct {
+	Mode     string     `json:"mode"`
+}
+
 // Commit and Header
 type ResultCommit struct {
 	types.SignedHeader `json:"signed_header"`

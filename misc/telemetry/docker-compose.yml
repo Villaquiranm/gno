@@ -48,7 +48,7 @@ services:
       - gnoland-net
 
   gnoland-val:
-    image: ghcr.io/gnolang/gno/gnoland:master
+    image: gnolang:local
     networks:
       - gnoland-net
     volumes:
@@ -85,9 +85,11 @@ services:
       start_period: 60s
 
   gnoland-rpc:
-    image: ghcr.io/gnolang/gno/gnoland:master
+    image: gnolang:local
     networks:
       - gnoland-net
+    ports:
+      - "26657:26657"
     volumes:
       # Shared Volume
       - gnoland-shared:/gnoroot/shared-data

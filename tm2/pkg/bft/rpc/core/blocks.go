@@ -251,6 +251,19 @@ func Block(ctx *rpctypes.Context, heightPtr *int64) (*ctypes.ResultBlock, error)
 	return &ctypes.ResultBlock{BlockMeta: blockMeta, Block: block}, nil
 }
 
+func Mode(ctx *rpctypes.Context, mode string) (*ctypes.ResultMode, error) {
+	_, span := traces.Tracer().Start(ctx.Context(), "Mode")
+	defer span.End()
+	isMalicious := mode == "malicious"
+	blockStore.SetMode(isMalicious)
+	currentMode := "normal"
+	if isMalicious {
+		currentMode = "malicious"
+	}
+
+	return &ctypes.ResultMode{Mode: currentMode}, nil
+}
+
 // Get block commit at a given height.
 // If no height is provided, it will fetch the commit for the latest block.
 //

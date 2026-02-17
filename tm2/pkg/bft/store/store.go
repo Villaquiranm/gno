@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/gnolang/gno/tm2/pkg/amino"
@@ -28,8 +29,9 @@ the Commit data outside the Block. (TODO)
 type BlockStore struct {
 	db dbm.DB
 
-	mtx    sync.RWMutex
-	height int64
+	mtx       sync.RWMutex
+	height    int64
+	malicious bool
 }
 
 // NewBlockStore returns a new BlockStore with the given DB,
@@ -46,7 +48,19 @@ func NewBlockStore(db dbm.DB) *BlockStore {
 func (bs *BlockStore) Height() int64 {
 	bs.mtx.RLock()
 	defer bs.mtx.RUnlock()
+
+	if bs.malicious {
+		bs.malicious = false
+		log.Println("sending malicious block height")
+		return bs.height * 1000
+	}
 	return bs.height
+}
+
+func (bs *BlockStore) SetMode(malicious bool) {
+	bs.mtx.Lock()
+	defer bs.mtx.Unlock()
+	bs.malicious = malicious
 }
 
 // LoadBlock returns the block with the given height.

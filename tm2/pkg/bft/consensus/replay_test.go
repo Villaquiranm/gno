@@ -1122,6 +1122,10 @@ func (bs *mockBlockStore) LoadBlockCommit(height int64) *types.Commit {
 	return bs.commits[height-1]
 }
 
+func (bs *mockBlockStore) SetMode(malicious bool) {
+
+}
+
 func (bs *mockBlockStore) LoadSeenCommit(height int64) *types.Commit {
 	return bs.commits[height-1]
 }

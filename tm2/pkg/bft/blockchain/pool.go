@@ -170,6 +170,7 @@ func (pool *BlockPool) IsCaughtUp() bool {
 		pool.Logger.Debug("Blockpool has no peers")
 		return false
 	}
+	pool.Logger.Debug("DEBUG: Max peer height!!", "height", pool.maxPeerHeight)
 
 	// Some conditions to determine if we're caught up.
 	// Ensures we've either received a block or waited some amount of time,
@@ -275,6 +276,7 @@ func (pool *BlockPool) MaxPeerHeight() int64 {
 
 // SetPeerHeight sets the peer's alleged blockchain height.
 func (pool *BlockPool) SetPeerHeight(peerID p2pTypes.ID, height int64) {
+	pool.Logger.Debug("SetPeerHeight", "HEIGHT", height, "peer", peerID)
 	pool.mtx.Lock()
 	defer pool.mtx.Unlock()
 

@@ -11,6 +11,7 @@ var Routes = map[string]*rpc.RPCFunc{
 	"health":               rpc.NewRPCFunc(Health, ""),
 	"status":               rpc.NewRPCFunc(Status, "heightGte"),
 	"net_info":             rpc.NewRPCFunc(NetInfo, ""),
+	"mode":                 rpc.NewRPCFunc(Mode, "mode"),
 	"blockchain":           rpc.NewRPCFunc(BlockchainInfo, "minHeight,maxHeight"),
 	"genesis":              rpc.NewRPCFunc(Genesis, ""),
 	"block":                rpc.NewRPCFunc(Block, "height"),

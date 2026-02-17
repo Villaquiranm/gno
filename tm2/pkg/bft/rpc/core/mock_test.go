@@ -46,6 +46,8 @@ func (m *mockBlockStore) LoadBlock(height int64) *types.Block {
 
 	return nil
 }
+func (m *mockBlockStore) SetMode(mode bool) {
+}
 
 func (m *mockBlockStore) LoadBlockPart(height int64, index int) *types.Part {
 	if m.loadBlockPartFn != nil {

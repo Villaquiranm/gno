@@ -58,6 +58,7 @@ type BlockchainReactor struct {
 
 	// immutable
 	initialState sm.State
+	peers        []p2p.PeerConn
 
 	blockExec *sm.BlockExecutor
 	store     *store.BlockStore
@@ -103,6 +104,7 @@ func NewBlockchainReactor(
 		requestsCh:          requestsCh,
 		errorsCh:            errorsCh,
 		switchToConsensusFn: switchToConsensusFn,
+		peers:               make([]p2p.PeerConn, 0),
 	}
 	bcR.BaseReactor = *p2p.NewBaseReactor("BlockchainReactor", bcR)
 	return bcR
@@ -116,12 +118,25 @@ func (bcR *BlockchainReactor) SetLogger(l *slog.Logger) {
 
 // OnStart implements cmn.Service.
 func (bcR *BlockchainReactor) OnStart() error {
+	bcR.Logger.Info("Fast sync mode", "enabled", bcR.fastSync)
 	if bcR.fastSync {
 		err := bcR.pool.Start()
 		if err != nil {
 			return err
 		}
 		go bcR.poolRoutine()
+		go func() {
+			for {
+				time.Sleep(time.Second * 10)
+				for _, peer := range bcR.peers {
+					msgBytes := amino.MustMarshalAny(&bcStatusResponseMessage{bcR.store.Height()})
+					ok := peer.Send(BlockchainChannel, msgBytes)
+					if !ok {
+						bcR.Logger.Error("BroadcastStatusRequest")
+					}
+				}
+			}
+		}()
 	}
 	return nil
 }
@@ -148,6 +163,7 @@ func (bcR *BlockchainReactor) GetChannels() []*p2p.ChannelDescriptor {
 func (bcR *BlockchainReactor) AddPeer(peer p2p.PeerConn) {
 	msgBytes := amino.MustMarshalAny(&bcStatusResponseMessage{bcR.store.Height()})
 	peer.Send(BlockchainChannel, msgBytes)
+	bcR.peers = append(bcR.peers, peer)
 	// it's OK if send fails. will try later in poolRoutine
 
 	// peer is added to the pool once we receive the first
@@ -202,11 +218,14 @@ func (bcR *BlockchainReactor) Receive(chID byte, src p2p.PeerConn, msgBytes []by
 		bcR.pool.AddBlock(src.ID(), msg.Block, len(msgBytes))
 	case *bcStatusRequestMessage:
 		// Send peer our state.
-		msgBytes := amino.MustMarshalAny(&bcStatusResponseMessage{bcR.store.Height()})
+		currentHeight := bcR.store.Height()
+		bcR.Logger.Debug("Receive", "currentHeight", currentHeight)
+		msgBytes := amino.MustMarshalAny(&bcStatusResponseMessage{currentHeight})
 		src.TrySend(BlockchainChannel, msgBytes)
 	case *bcStatusResponseMessage:
 		// Got a peer status. Unverified.
 		bcR.pool.SetPeerHeight(src.ID(), msg.Height)
+		bcR.Logger.Debug("Receive", "maxCurrentHeight", bcR.pool.maxPeerHeight)
 	default:
 		bcR.Logger.Error(fmt.Sprintf("Unknown message type %v", reflect.TypeOf(msg)))
 	}
@@ -215,6 +234,7 @@ func (bcR *BlockchainReactor) Receive(chID byte, src p2p.PeerConn, msgBytes []by
 // Handle messages from the poolReactor telling the reactor what to do.
 // NOTE: Don't sleep in the FOR_LOOP or otherwise slow it down!
 func (bcR *BlockchainReactor) poolRoutine() {
+	bcR.Logger.Info("enter poolRoutine")
 	trySyncTicker := time.NewTicker(trySyncIntervalMS * time.Millisecond)
 	statusUpdateTicker := time.NewTicker(statusUpdateIntervalSeconds * time.Second)
 	switchToConsensusTicker := time.NewTicker(switchToConsensusIntervalSeconds * time.Second)
@@ -231,6 +251,7 @@ func (bcR *BlockchainReactor) poolRoutine() {
 
 	go func() {
 		for {
+			bcR.Logger.Debug("poolRoutine", "maxblockHeigh", bcR.pool.maxPeerHeight)
 			select {
 			case <-bcR.Quit():
 				return

@@ -15,6 +15,7 @@ import (
 // BlockStoreRPC is the block store interface used by the RPC.
 type BlockStoreRPC interface {
 	Height() int64
+	SetMode(malicious bool)
 
 	LoadBlockMeta(height int64) *types.BlockMeta
 	LoadBlock(height int64) *types.Block
