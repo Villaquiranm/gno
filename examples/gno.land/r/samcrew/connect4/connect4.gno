@@ -2,18 +2,24 @@
 // a ugnot stake; anyone (or a named opponent) accepts with the same stake;
 // the winner takes the pot minus a flat house fee.
 //
+// The first mover is picked by commit-reveal: the creator offers with
+// sha256(passphrase) and must Reveal the passphrase within 90s of Accept, or
+// forfeit. Randomness computed in Accept could be re-rolled by an acceptor
+// who bundles [Accept, Play] in one atomic tx and lets it revert.
+//
 // Every move has a 90s clock measured in block time. Nothing on-chain fires
 // by itself, so an expired clock is settled by anyone calling ClaimTimeout:
-// if the first mover never moved the game is void and both stakes are
-// refunded, otherwise the player who ran out of time forfeits.
+// an unrevealed game is won by the acceptor, a game whose first mover never
+// moved is void and both stakes are refunded, otherwise the player who ran
+// out of time forfeits.
 package connect4
 
 import (
 	"chain"
 	"chain/banker"
-	"chain/runtime"
 	"chain/runtime/unsafe"
 	"crypto/sha256"
+	"encoding/hex"
 	"strconv"
 	"strings"
 	"time"
@@ -52,9 +58,11 @@ type Game struct {
 	Stake     int64 // ugnot, per player
 	Fee       int64 // ugnot house fee, fixed at offer time
 	ExpiresAt time.Time
+	// Commitment is the lowercase hex sha256 of the creator's passphrase.
+	Commitment string
 
 	Board    board
-	Turn     byte // 1 = creator, 2 = acceptor
+	Turn     byte // 0 = awaiting Reveal, 1 = creator, 2 = acceptor
 	Moves    int
 	LastMove time.Time
 	Status   Status
@@ -70,15 +78,17 @@ var (
 	games         avl.Tree // key(id) -> *Game
 	active        avl.Tree // key(id) -> *Game, only Open and Playing
 	stats         avl.Tree // address -> *Stats
+	commitments   avl.Tree // every commitment ever offered -> true
 	nextID        int
-	fee           int64 = 100_000 // ugnot per decided game
+	fee           int64 = 100_000 // ugnot per decisive game
 	feesCollected int64
 	owner         = ownable.NewWithAddress("g1cvr48r7l7lkmvp77cr6zg2zhu26jgfwr0y8pew")
 )
 
 // Offer posts a game open for validFor minutes. The stake is the ugnot sent
-// with the call. A non-empty opponent makes the offer private.
-func Offer(cur realm, opponent address, validFor int) int {
+// with the call. A non-empty opponent makes the offer private. commitment is
+// the lowercase hex sha256 of a secret passphrase, revealed after Accept.
+func Offer(cur realm, opponent address, validFor int, commitment string) int {
 	stake := received(cur)
 	caller := cur.Previous().Address()
 	if stake < minStake {
@@ -96,6 +106,13 @@ func Offer(cur realm, opponent address, validFor int) int {
 	if opponent == caller {
 		panic("cannot challenge yourself")
 	}
+	if !isHexSHA256(commitment) {
+		panic("commitment must be 64 lowercase hex chars (sha256 of your passphrase)")
+	}
+	if commitments.Has(commitment) {
+		panic("commitment already used, pick a new passphrase")
+	}
+	commitments.Set(commitment, true)
 	nextID++
 	g := &Game{
 		ID:        nextID,
@@ -104,14 +121,16 @@ func Offer(cur realm, opponent address, validFor int) int {
 		Stake:     stake,
 		Fee:       fee,
 		ExpiresAt: time.Now().Add(time.Duration(validFor) * time.Minute),
+
+		Commitment: commitment,
 	}
 	games.Set(key(g.ID), g)
 	active.Set(key(g.ID), g)
 	return g.ID
 }
 
-// Accept joins an open offer by sending exactly its stake. The first mover
-// is picked from the accepting block and has 90s to play.
+// Accept joins an open offer by sending exactly its stake. The creator then
+// has 90s to Reveal, which picks the first mover.
 func Accept(cur realm, id int) {
 	stake := received(cur)
 	caller := cur.Previous().Address()
@@ -133,15 +152,42 @@ func Accept(cur realm, id int) {
 	}
 	g.Acceptor = caller
 	g.Status = Playing
+	g.LastMove = time.Now() // Turn stays 0 until Reveal
+}
+
+// Reveal discloses the creator's passphrase, which picks the first mover.
+// It must come within 90s of Accept.
+func Reveal(cur realm, id int, passphrase string) {
+	noCoins()
+	g := mustGet(id)
+	if g.Status != Playing || g.Turn != 0 {
+		panic("game is not awaiting a reveal")
+	}
+	if cur.Previous().Address() != g.Creator {
+		panic("only the creator can reveal")
+	}
+	if time.Now().After(g.deadline()) {
+		panic("reveal clock ran out")
+	}
+	if sha256Hex(passphrase) != g.Commitment {
+		panic("passphrase does not match the commitment")
+	}
+	h := sha256.Sum256([]byte(strings.Join([]string{
+		passphrase, strconv.Itoa(g.ID), g.Creator.String(), g.Acceptor.String(),
+	}, "|")))
+	g.Turn = 1 + h[0]&1
 	g.LastMove = time.Now()
-	g.Turn = firstMover(g)
 }
 
 // Play drops a piece in column (1-7).
 func Play(cur realm, id, column int) {
+	noCoins()
 	g := mustGet(id)
 	if g.Status != Playing {
 		panic("game is not in progress")
+	}
+	if g.Turn == 0 {
+		panic("waiting for the creator to reveal")
 	}
 	if cur.Previous().Address() != g.player(g.Turn) {
 		panic("not your turn")
@@ -170,12 +216,17 @@ func Play(cur realm, id, column int) {
 
 // ClaimTimeout settles a game whose move clock ran out. Anyone may call it.
 func ClaimTimeout(cur realm, id int) {
+	noCoins()
 	g := mustGet(id)
 	if g.Status != Playing {
 		panic("game is not in progress")
 	}
 	if !time.Now().After(g.deadline()) {
 		panic("move clock has not run out")
+	}
+	if g.Turn == 0 { // creator never revealed: forfeit
+		settleWin(cur, g, g.Acceptor)
+		return
 	}
 	if g.Moves == 0 {
 		settleVoid(cur, g)
@@ -186,6 +237,7 @@ func ClaimTimeout(cur realm, id int) {
 
 // Resign concedes a game in progress.
 func Resign(cur realm, id int) {
+	noCoins()
 	g := mustGet(id)
 	if g.Status != Playing {
 		panic("game is not in progress")
@@ -200,14 +252,16 @@ func Resign(cur realm, id int) {
 	}
 }
 
-// Cancel withdraws an open offer, expired or not, and refunds the stake.
+// Cancel withdraws an open offer and refunds the creator. The creator may
+// cancel at any time; anyone may once the offer has expired.
 func Cancel(cur realm, id int) {
+	noCoins()
 	g := mustGet(id)
 	if g.Status != Open {
 		panic("game is not open")
 	}
-	if cur.Previous().Address() != g.Creator {
-		panic("only the creator can cancel")
+	if cur.Previous().Address() != g.Creator && time.Now().Before(g.ExpiresAt) {
+		panic("only the creator can cancel an unexpired offer")
 	}
 	finish(g, Cancelled)
 	send(cur, g.Creator, g.Stake)
@@ -216,6 +270,7 @@ func Cancel(cur realm, id int) {
 // SetFee changes the flat house fee, in ugnot, for new offers. Games already
 // offered keep the fee they were created with.
 func SetFee(cur realm, amount int64) {
+	noCoins()
 	owner.AssertOwnedBy(cur.Previous().Address())
 	if amount < 0 {
 		panic("fee must not be negative")
@@ -225,6 +280,7 @@ func SetFee(cur realm, amount int64) {
 
 // WithdrawFees sends all collected fees to to.
 func WithdrawFees(cur realm, to address) {
+	noCoins()
 	owner.AssertOwnedBy(cur.Previous().Address())
 	amount := feesCollected
 	feesCollected = 0
@@ -232,6 +288,7 @@ func WithdrawFees(cur realm, to address) {
 }
 
 func TransferOwnership(cur realm, newOwner address) {
+	noCoins()
 	if err := owner.TransferOwnership(0, cur, newOwner); err != nil {
 		panic(err)
 	}
@@ -251,16 +308,29 @@ func received(cur realm) int64 {
 	return sent[0].Amount
 }
 
-func firstMover(g *Game) byte {
-	seed := strings.Join([]string{
-		strconv.FormatInt(runtime.ChainHeight(), 10),
-		strconv.FormatInt(time.Now().UnixNano(), 10),
-		strconv.Itoa(g.ID),
-		g.Creator.String(),
-		g.Acceptor.String(),
-	}, "|")
-	h := sha256.Sum256([]byte(seed))
-	return 1 + h[0]&1
+// noCoins guards calls that take no payment: coins sent with them would be
+// stuck in the realm.
+func noCoins() {
+	if len(unsafe.OriginSend()) != 0 {
+		panic("this function does not accept coins")
+	}
+}
+
+func sha256Hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
+func isHexSHA256(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func settleWin(cur realm, g *Game, winner address) {
@@ -330,7 +400,10 @@ func statsOf(addr address) *Stats {
 // key zero-pads ids so avl iteration order matches creation order.
 func key(id int) string {
 	s := strconv.Itoa(id)
-	return strings.Repeat("0", 10-len(s)) + s
+	if len(s) < 10 {
+		s = strings.Repeat("0", 10-len(s)) + s
+	}
+	return s
 }
 
 func get(id int) *Game {

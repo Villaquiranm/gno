@@ -44,8 +44,12 @@ func renderLobby() string {
 			open.WriteString("| " + gnot(g.Stake) + " | " + g.Creator.String() + " | " + who +
 				" | " + remaining(g.ExpiresAt.Sub(now)) + " | [Accept](" + accept + ") |\n")
 		case g.Status == Playing:
+			turn := g.player(g.Turn).String()
+			if g.Turn == 0 {
+				turn = g.Creator.String() + " (reveal)"
+			}
 			live.WriteString("| [#" + strconv.Itoa(g.ID) + "](" + gamePath + strconv.Itoa(g.ID) + ") | " +
-				gnot(2*g.Stake) + " | " + g.player(g.Turn).String() + " | " + remaining(g.deadline().Sub(now)) + " |\n")
+				gnot(2*g.Stake) + " | " + turn + " | " + remaining(g.deadline().Sub(now)) + " |\n")
 		}
 		return false
 	})
@@ -54,7 +58,14 @@ func renderLobby() string {
 	b.WriteString("# Connect 4\n\n")
 	b.WriteString("Both players stake the same amount; the winner takes the pot minus a " + gnot(fee) + " fee. " +
 		"90s per move: run out and you forfeit. If the first mover never moves, both stakes are refunded.\n\n")
-	b.WriteString("[Post an offer](" + txlink.NewLink("Offer").AddArgs("opponent", "", "validFor", "15").URL() + ")\n\n")
+	b.WriteString("The first mover is picked by a secret passphrase you choose when posting an offer. " +
+		"Send its sha256 as `commitment`:\n\n" +
+		"    printf %s 'your pass phrase' | shasum -a 256\n\n" +
+		"Once your offer is accepted you have 90s to reveal the passphrase, or you forfeit. " +
+		"Make it unguessable (use 4+ random words): the commitment is public, so a weak passphrase can be brute-forced.\n\n")
+	b.WriteString("[Post an offer](" + txlink.NewLink("Offer").
+		AddArgs("opponent", "", "validFor", "15", "commitment", "").
+		SetSend(strconv.Itoa(minStake)+denom).URL() + ")\n\n")
 	b.WriteString("## Open offers\n\n")
 	if open.Len() == 0 {
 		b.WriteString("No open offers.\n\n")
@@ -90,8 +101,19 @@ func renderGame(g *Game) string {
 	}
 	b.WriteString("\n")
 
-	switch g.Status {
-	case Playing:
+	switch {
+	case g.Status == Playing && g.Turn == 0:
+		left := g.deadline().Sub(time.Now())
+		b.WriteString("Waiting for creator to reveal\n\n")
+		if left > 0 {
+			b.WriteString("Time left: " + remaining(left) + "\n\n")
+			b.WriteString("[Reveal](" + txlink.NewLink("Reveal").AddArgs("id", id, "passphrase", "").URL() + ") (creator only)\n\n")
+		} else {
+			b.WriteString("Reveal clock ran out: [Claim timeout](" +
+				txlink.NewLink("ClaimTimeout").AddArgs("id", id).URL() + ")\n\n")
+		}
+		b.WriteString("[Resign](" + txlink.NewLink("Resign").AddArgs("id", id).URL() + ")\n")
+	case g.Status == Playing:
 		left := g.deadline().Sub(time.Now())
 		b.WriteString("Turn: " + [...]string{"", "🔴", "🟡"}[g.Turn] + " " + g.player(g.Turn).String() + "\n\n")
 		if left > 0 {
@@ -106,7 +128,7 @@ func renderGame(g *Game) string {
 				txlink.NewLink("ClaimTimeout").AddArgs("id", id).URL() + ")\n\n")
 		}
 		b.WriteString("[Resign](" + txlink.NewLink("Resign").AddArgs("id", id).URL() + ")\n")
-	case Won:
+	case g.Status == Won:
 		b.WriteString("Winner: " + g.Winner.String() + "\n")
 	}
 	return b.String()

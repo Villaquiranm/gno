@@ -4,11 +4,18 @@ package main
 
 import (
 	"chain"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 
 	"gno.land/p/nt/testutils/v0"
 	"gno.land/r/samcrew/connect4"
 )
+
+func commit(passphrase string) string {
+	h := sha256.Sum256([]byte(passphrase))
+	return hex.EncodeToString(h[:])
+}
 
 func main(cur realm) {
 	alice := testutils.TestAddress("alice")
@@ -20,12 +27,12 @@ func main(cur realm) {
 	testing.SetRealm(testing.NewUserRealm(alice))
 	testing.SetOriginSend(stake)
 	testing.IssueCoins(c4, stake)
-	g1 := connect4.Offer(cross(cur), "", 15)
+	g1 := connect4.Offer(cross(cur), "", 15, commit("alice four random words"))
 
 	testing.SetRealm(testing.NewUserRealm(carol))
 	testing.SetOriginSend(stake)
 	testing.IssueCoins(c4, stake)
-	connect4.Offer(cross(cur), bob, 5)
+	connect4.Offer(cross(cur), bob, 5, commit("carol four random words"))
 
 	testing.SetRealm(testing.NewUserRealm(bob))
 	testing.SetOriginSend(stake)
@@ -37,6 +44,8 @@ func main(cur realm) {
 	println(connect4.Render("game/1"))
 	println("-----")
 	println(connect4.Render("game/x"))
+	println("-----")
+	println(connect4.Render("game/99999999999"))
 }
 
 // Output:
@@ -44,7 +53,13 @@ func main(cur realm) {
 //
 // Both players stake the same amount; the winner takes the pot minus a 0.1 GNOT fee. 90s per move: run out and you forfeit. If the first mover never moves, both stakes are refunded.
 //
-// [Post an offer]($help&func=Offer&opponent=&validFor=15)
+// The first mover is picked by a secret passphrase you choose when posting an offer. Send its sha256 as `commitment`:
+//
+//     printf %s 'your pass phrase' | shasum -a 256
+//
+// Once your offer is accepted you have 90s to reveal the passphrase, or you forfeit. Make it unguessable (use 4+ random words): the commitment is public, so a weak passphrase can be brute-forced.
+//
+// [Post an offer]($help&func=Offer&.send=1000000ugnot&commitment=&opponent=&validFor=15)
 //
 // ## Open offers
 //
@@ -56,7 +71,7 @@ func main(cur realm) {
 //
 // | Game | Pot | Turn | Time left |
 // |---|---|---|---|
-// | [#1](/r/samcrew/connect4:game/1) | 10 GNOT | g1v9kxjcm9ta047h6lta047h6lta047h6lzd40gh | 1m30s |
+// | [#1](/r/samcrew/connect4:game/1) | 10 GNOT | g1v9kxjcm9ta047h6lta047h6lta047h6lzd40gh (reveal) | 1m30s |
 //
 // ## Most games won
 //
@@ -82,13 +97,16 @@ func main(cur realm) {
 // ⚪⚪⚪⚪⚪⚪⚪
 // ⚪⚪⚪⚪⚪⚪⚪
 //
-// Turn: 🔴 g1v9kxjcm9ta047h6lta047h6lta047h6lzd40gh
+// Waiting for creator to reveal
 //
 // Time left: 1m30s
 //
-// [1]($help&func=Play&column=1&id=1) [2]($help&func=Play&column=2&id=1) [3]($help&func=Play&column=3&id=1) [4]($help&func=Play&column=4&id=1) [5]($help&func=Play&column=5&id=1) [6]($help&func=Play&column=6&id=1) [7]($help&func=Play&column=7&id=1)
+// [Reveal]($help&func=Reveal&id=1&passphrase=) (creator only)
 //
 // [Resign]($help&func=Resign&id=1)
+//
+// -----
+// # Not found
 //
 // -----
 // # Not found
