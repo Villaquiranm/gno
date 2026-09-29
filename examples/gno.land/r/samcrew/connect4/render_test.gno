@@ -1,6 +1,7 @@
 package connect4
 
 import (
+	"encoding/base64"
 	"strconv"
 	"strings"
 	"testing"
@@ -112,4 +113,88 @@ func TestNewOfferPage(t *testing.T) {
 		uassert.True(t, strings.Contains(out, "Fix the following"), q)
 		uassert.False(t, strings.Contains(out, "<script>"), "form input echoed: "+q)
 	}
+}
+
+// svgs returns the decoded SVG of every data-URI image in out, and the
+// markdown that immediately wraps each image ("[" link or "" for none).
+func svgs(t *testing.T, out string) (images []string, linked []bool) {
+	parts := strings.Split(out, "(data:image/svg+xml;base64,")
+	for i, p := range parts[1:] {
+		end := strings.Index(p, ")")
+		raw, err := base64.StdEncoding.DecodeString(p[:end])
+		if err != nil {
+			t.Fatalf("image %d is not base64: %v", i, err)
+		}
+		images = append(images, string(raw))
+		before := parts[i]
+		img := strings.LastIndex(before, "![")
+		linked = append(linked, img > 0 && before[img-1] == '[')
+	}
+	return images, linked
+}
+
+func TestBoardIsClickableSVGColumns(cur realm, t *testing.T) {
+	reset()
+	g, p := accepted(cur)
+	page := "game/" + strconv.Itoa(g.ID)
+
+	// Reveal phase: the board is one image holding all 7 columns, not a link.
+	out := Render(page)
+	images, linked := svgs(t, out)
+	uassert.Equal(t, 1, len(images))
+	uassert.Equal(t, 7, strings.Count(images[0], `class="col"`))
+	uassert.False(t, linked[0], "no clickable column before the reveal")
+	uassert.True(t, strings.Contains(out, "![board: column 1:"), "alt text")
+	uassert.False(t, strings.Contains(out, "func=Play"))
+
+	testing.SetRealm(testing.NewUserRealm(alice))
+	pay(0)
+	Reveal(cross(cur), g.ID, p)
+	first := g.Turn
+	move(cur, g, 3) // first mover drops in column 3
+
+	out = Render(page)
+	for c := 1; c <= 7; c++ {
+		uassert.True(t, strings.Contains(out, "](/r/samcrew/connect4$help&func=Play&column="+strconv.Itoa(c)+"&id=") ||
+			strings.Contains(out, "$help&func=Play&column="+strconv.Itoa(c)+"&id="), "column link "+strconv.Itoa(c))
+	}
+	images, linked = svgs(t, out)
+	boardImgs := 0
+	for i, img := range images {
+		if strings.Contains(img, `class="col"`) {
+			boardImgs++
+			uassert.True(t, linked[i], "board column must be a link while playing")
+		}
+	}
+	uassert.Equal(t, 7, boardImgs)
+	col3 := images[boardIndex(images, 3)]
+	uassert.True(t, strings.Contains(col3, `fill="`+[...]string{"", red, yellow}[first]+`"`), col3)
+	uassert.True(t, strings.Contains(col3, `stroke="`+lastMoveStroke+`"`), "last move ring")
+	uassert.True(t, strings.Contains(out, "![column 3: "+[...]string{"", "red", "yellow"}[first]), "alt text")
+
+	// Win with four stacked in column 1: the four cells get the win ring.
+	for _, c := range []int{1, 2, 1, 2, 1, 2} {
+		move(cur, g, c)
+	}
+	move(cur, g, 1)
+	uassert.Equal(t, "won", g.Status.String())
+	out = Render(page)
+	images, _ = svgs(t, out)
+	uassert.Equal(t, 1, len(images))
+	uassert.Equal(t, 4, strings.Count(images[0], `stroke="`+winStroke+`"`), images[0])
+	uassert.False(t, strings.Contains(out, "func=Play"))
+}
+
+// boardIndex returns the index in images of board column c (1-based).
+func boardIndex(images []string, c int) int {
+	n := 0
+	for i, img := range images {
+		if strings.Contains(img, `class="col"`) {
+			n++
+			if n == c {
+				return i
+			}
+		}
+	}
+	return -1
 }

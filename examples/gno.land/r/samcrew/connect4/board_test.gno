@@ -49,3 +49,20 @@ func TestDropFullColumn(t *testing.T) {
 		t.Fatal("drop into full column should return -1")
 	}
 }
+
+func TestWinLine(t *testing.T) {
+	var b board
+	if c, r := play(&b, 1, 0, 1, 2); b.winLine(c, r) != nil {
+		t.Fatal("three in a row is not a win")
+	}
+	c, r := play(&b, 1, 3)
+	line := b.winLine(c, r)
+	if len(line) != 4 {
+		t.Fatalf("want 4 winning cells, got %v", line)
+	}
+	for i, cell := range line {
+		if cell != [2]int{i, 0} {
+			t.Fatalf("cell %d = %v, want [%d 0]", i, cell, i)
+		}
+	}
+}

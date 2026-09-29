@@ -20,14 +20,25 @@ func (b *board) drop(c int, p byte) int {
 }
 
 // wins reports whether the piece at (c, r) is part of four in a row.
-func (b *board) wins(c, r int) bool {
+func (b *board) wins(c, r int) bool { return b.winLine(c, r) != nil }
+
+// winLine returns the cells of the four-or-more line through (c, r), in order
+// along the line, or nil if the piece there completes none.
+func (b *board) winLine(c, r int) [][2]int {
 	p := b[c][r]
 	for _, d := range [4][2]int{{1, 0}, {0, 1}, {1, 1}, {1, -1}} {
-		if 1+b.count(c, r, d[0], d[1], p)+b.count(c, r, -d[0], -d[1], p) >= 4 {
-			return true
+		back := b.count(c, r, -d[0], -d[1], p)
+		n := 1 + back + b.count(c, r, d[0], d[1], p)
+		if n >= 4 {
+			line := make([][2]int, n)
+			for i := range line {
+				k := i - back
+				line[i] = [2]int{c + k*d[0], r + k*d[1]}
+			}
+			return line
 		}
 	}
-	return false
+	return nil
 }
 
 // count returns how many consecutive p pieces follow (c, r) in direction (dc, dr).

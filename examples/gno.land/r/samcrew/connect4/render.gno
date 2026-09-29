@@ -9,7 +9,24 @@ import (
 	"time"
 
 	"gno.land/p/moul/txlink/v0"
+	"gno.land/p/nt/svg/v0"
 )
+
+// Board colours. gnoweb only embeds SVG as data-URI images, so each column is
+// its own image, wrapped in its Play link while the game is being played.
+const (
+	red            = "#e53935"
+	yellow         = "#fdd835"
+	hole           = "#ffffff"
+	boardBlue      = "#1565c0"
+	lastMoveStroke = "#212121"
+	winStroke      = "#00e676"
+	cellPx         = 48
+	headerPx       = 20
+)
+
+var pieceColor = [...]string{hole, red, yellow}
+var pieceName = [...]string{"empty", "red", "yellow"}
 
 // Render serves "" (lobby and leaderboards), "new" (offer form) and
 // "game/<id>" (one game with every action its state allows).
@@ -163,15 +180,7 @@ func renderGame(g *Game) string {
 	b.WriteString("# Game #" + id + " — " + g.Status.String() + "\n\n[← Lobby](" + pageURL("") + ")\n\n")
 	b.WriteString("🔴 " + g.Creator.String() + "  \n🟡 " + orNone(g.Acceptor) + "  \n")
 	b.WriteString("Stake: " + gnot(g.Stake) + " each · fee " + gnot(g.Fee) + "\n\n")
-
-	b.WriteString("1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣  \n")
-	for r := rows - 1; r >= 0; r-- {
-		for c := 0; c < cols; c++ {
-			b.WriteString([...]string{"⚪", "🔴", "🟡"}[g.Board[c][r]])
-		}
-		b.WriteString("  \n")
-	}
-	b.WriteString("\n")
+	b.WriteString(boardView(g, now) + "\n\n")
 
 	switch g.Status {
 	case Open:
@@ -200,12 +209,7 @@ func renderGame(g *Game) string {
 		}
 		b.WriteString("Turn: " + [...]string{"", "🔴", "🟡"}[g.Turn] + " " + g.player(g.Turn).String() + "\n\n")
 		if left > 0 {
-			b.WriteString("Time left: " + remaining(left) + "\n\nPlay column: ")
-			for c := 1; c <= cols; c++ {
-				b.WriteString("[" + strconv.Itoa(c) + "](" +
-					txlink.NewLink("Play").AddArgs("id", id, "column", strconv.Itoa(c)).URL() + ") ")
-			}
-			b.WriteString("\n\n")
+			b.WriteString("Time left: " + remaining(left) + " · click a column to drop your piece\n\n")
 		} else {
 			b.WriteString(claim)
 		}
@@ -220,6 +224,58 @@ func renderGame(g *Game) string {
 		b.WriteString("Cancelled: stake refunded to the creator.\n")
 	}
 	return b.String()
+}
+
+// boardView draws the board. While a move can be played it is 7 column
+// images, each wrapped in its Play link (gnoweb lays linked images out side by
+// side). Otherwise it is one image of all 7 columns, since gnoweb stacks bare
+// images vertically. The last move gets a dark ring, a winning line a green one.
+func boardView(g *Game, now time.Time) string {
+	playable := g.Status == Playing && g.Turn != 0 && !now.After(g.deadline())
+	var win [cols][rows]bool
+	if g.Status == Won && g.Moves > 0 {
+		for _, cell := range g.Board.winLine(g.LastCol, g.LastRow) {
+			win[cell[0]][cell[1]] = true
+		}
+	}
+	const height = headerPx + rows*cellPx
+	if !playable {
+		canvas := svg.NewCanvas(cols*cellPx, height).WithViewBox(0, 0, cols*cellPx, height)
+		alt := "board:"
+		for c := 0; c < cols; c++ {
+			alt += " " + drawColumn(canvas, g, &win, c, c*cellPx) + ";"
+		}
+		return canvas.Render(alt)
+	}
+	id := strconv.Itoa(g.ID)
+	var b strings.Builder
+	for c := 0; c < cols; c++ {
+		canvas := svg.NewCanvas(cellPx, height).WithViewBox(0, 0, cellPx, height)
+		alt := drawColumn(canvas, g, &win, c, 0)
+		b.WriteString("[" + canvas.Render(alt) + "](" +
+			txlink.NewLink("Play").AddArgs("id", id, "column", strconv.Itoa(c+1)).URL() + ")")
+	}
+	return b.String()
+}
+
+// drawColumn draws column c at horizontal offset x and returns its alt text.
+func drawColumn(canvas *svg.Canvas, g *Game, win *[cols][rows]bool, c, x int) string {
+	bg := svg.NewRectangle(x, 0, cellPx, headerPx+rows*cellPx, boardBlue)
+	bg.Attr.Class = "col"
+	canvas.Append(bg, svg.NewText(x+cellPx/2-4, 15, strconv.Itoa(c+1), hole))
+	alt := "column " + strconv.Itoa(c+1) + ":"
+	for r := 0; r < rows; r++ {
+		disc := svg.NewCircle(x+cellPx/2, headerPx+(rows-1-r)*cellPx+cellPx/2, cellPx/2-5, pieceColor[g.Board[c][r]])
+		switch {
+		case win[c][r]:
+			disc.Attr.Stroke, disc.Attr.StrokeWidth = winStroke, "5"
+		case g.Moves > 0 && c == g.LastCol && r == g.LastRow:
+			disc.Attr.Stroke, disc.Attr.StrokeWidth = lastMoveStroke, "3"
+		}
+		canvas.Append(disc)
+		alt += " " + pieceName[g.Board[c][r]]
+	}
+	return alt
 }
 
 func acceptURL(g *Game) string {

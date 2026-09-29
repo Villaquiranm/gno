@@ -64,6 +64,8 @@ type Game struct {
 	Board    board
 	Turn     byte // 0 = awaiting Reveal, 1 = creator, 2 = acceptor
 	Moves    int
+	LastCol  int // column and row of the last piece dropped, valid if Moves > 0
+	LastRow  int
 	LastMove time.Time
 	Status   Status
 	Winner   address
@@ -208,6 +210,7 @@ func Play(cur realm, id, column int) {
 		panic("column is full")
 	}
 	g.Moves++
+	g.LastCol, g.LastRow = column-1, r
 	switch {
 	case g.Board.wins(column-1, r):
 		settleWin(cur, g, g.player(g.Turn))
