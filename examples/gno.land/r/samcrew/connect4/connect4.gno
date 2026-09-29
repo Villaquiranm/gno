@@ -90,23 +90,11 @@ var (
 func Offer(cur realm, opponent address, validFor int, commitment string) int {
 	stake := received(cur)
 	caller := cur.Previous().Address()
-	if stake < minStake {
-		panic("stake below minimum of " + strconv.Itoa(minStake) + denom)
-	}
-	if stake <= fee {
-		panic("stake must exceed the house fee of " + strconv.FormatInt(fee, 10) + denom)
-	}
-	if validFor < 1 || validFor > maxOfferTTL {
-		panic("validFor must be between 1 and 60 minutes")
-	}
-	if opponent != "" && !opponent.IsValid() {
-		panic("invalid opponent address")
-	}
 	if opponent == caller {
 		panic("cannot challenge yourself")
 	}
-	if !isHexSHA256(commitment) {
-		panic("commitment must be 64 lowercase hex chars (sha256 of your passphrase)")
+	if errs := validateOffer(stake, validFor, opponent, commitment); len(errs) > 0 {
+		panic(errs[0])
 	}
 	nextID++
 	g := &Game{
@@ -122,6 +110,28 @@ func Offer(cur realm, opponent address, validFor int, commitment string) int {
 	games.Set(key(g.ID), g)
 	active.Set(key(g.ID), g)
 	return g.ID
+}
+
+// validateOffer returns every rule an offer breaks. Offer panics with the
+// first; the "new" page lists them all before anyone signs.
+func validateOffer(stake int64, validFor int, opponent address, commitment string) []string {
+	var errs []string
+	if stake < minStake {
+		errs = append(errs, "stake below minimum of "+gnot(minStake))
+	}
+	if stake <= fee {
+		errs = append(errs, "stake must exceed the house fee of "+gnot(fee))
+	}
+	if validFor < 1 || validFor > maxOfferTTL {
+		errs = append(errs, "validFor must be between 1 and 60 minutes")
+	}
+	if opponent != "" && !opponent.IsValid() {
+		errs = append(errs, "invalid opponent address")
+	}
+	if !isHexSHA256(commitment) {
+		errs = append(errs, "commitment must be 64 lowercase hex chars (sha256 of your passphrase)")
+	}
+	return errs
 }
 
 // Accept joins an open offer by sending exactly its stake. The creator then

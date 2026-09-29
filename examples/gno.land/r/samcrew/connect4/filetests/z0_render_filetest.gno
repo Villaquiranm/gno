@@ -39,9 +39,15 @@ func main(cur realm) {
 	testing.IssueCoins(c4, stake)
 	connect4.Accept(cross(cur), g1)
 
+	// Render runs as the realm itself, as it does under gnoweb.
+	testing.SetRealm(testing.NewCodeRealm("gno.land/r/samcrew/connect4"))
 	println(connect4.Render(""))
 	println("-----")
 	println(connect4.Render("game/1"))
+	println("-----")
+	println(connect4.Render("game/2"))
+	println("-----")
+	println(connect4.Render("new?stake=12.5&validFor=10&opponent=&commitment=5fb8d3d0c4f3b0fe7ab6ab1f7eda42c6e2de0c3c1d4a6c5e3d0f2f5d0e4f5a6b"))
 	println("-----")
 	println(connect4.Render("game/x"))
 	println("-----")
@@ -53,19 +59,13 @@ func main(cur realm) {
 //
 // Both players stake the same amount; the winner takes the pot minus a 0.1 GNOT fee. 90s per move: run out and you forfeit. If the first mover never moves, both stakes are refunded.
 //
-// The first mover is picked by a secret passphrase you choose when posting an offer. Send its sha256 as `commitment`:
-//
-//     printf %s 'your pass phrase' | shasum -a 256
-//
-// Once your offer is accepted you have 90s to reveal the passphrase, or you forfeit. Make it unguessable (use 4+ random words) and use a fresh one for every offer: the commitment is public, so a weak or already-revealed passphrase lets others predict who moves first.
-//
-// [Post an offer]($help&func=Offer&.send=1000000ugnot&commitment=&opponent=&validFor=15)
+// **[Post an offer](/r/samcrew/connect4:new)** · open a game below to play it
 //
 // ## Open offers
 //
-// | Stake | Creator | For | Expires in | |
-// |---|---|---|---|---|
-// | 5 GNOT | g1vdshymmvta047h6lta047h6lta047h6l2asz94 | g1vfhkyh6lta047h6lta047h6lta047h6l03vdhu | 5m0s | [Accept]($help&func=Accept&.send=5000000ugnot&id=2) |
+// | Game | Stake | Creator | For | Expires in | |
+// |---|---|---|---|---|---|
+// | [#2](/r/samcrew/connect4:game/2) | 5 GNOT | g1vdshymmvta047h6lta047h6lta047h6l2asz94 | g1vfhkyh6lta047h6lta047h6lta047h6l03vdhu | 5m0s | [Accept](/r/samcrew/connect4$help&func=Accept&.send=5000000ugnot&id=2) |
 //
 // ## Live games
 //
@@ -85,9 +85,11 @@ func main(cur realm) {
 // -----
 // # Game #1 — playing
 //
+// [← Lobby](/r/samcrew/connect4)
+//
 // 🔴 g1v9kxjcm9ta047h6lta047h6lta047h6lzd40gh
 // 🟡 g1vfhkyh6lta047h6lta047h6lta047h6l03vdhu
-// Stake: 5 GNOT each
+// Stake: 5 GNOT each · fee 0.1 GNOT
 //
 // 1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣
 // ⚪⚪⚪⚪⚪⚪⚪
@@ -97,13 +99,58 @@ func main(cur realm) {
 // ⚪⚪⚪⚪⚪⚪⚪
 // ⚪⚪⚪⚪⚪⚪⚪
 //
-// Waiting for creator to reveal
+// Waiting for the creator to reveal the passphrase.
 //
 // Time left: 1m30s
 //
-// [Reveal]($help&func=Reveal&id=1&passphrase=) (creator only)
+// **[Reveal](/r/samcrew/connect4$help&func=Reveal&id=1&passphrase=)** (creator)
 //
-// [Resign]($help&func=Resign&id=1)
+// [Resign](/r/samcrew/connect4$help&func=Resign&id=1)
+//
+// -----
+// # Game #2 — open
+//
+// [← Lobby](/r/samcrew/connect4)
+//
+// 🔴 g1vdshymmvta047h6lta047h6lta047h6l2asz94
+// 🟡 waiting for opponent
+// Stake: 5 GNOT each · fee 0.1 GNOT
+//
+// 1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣
+// ⚪⚪⚪⚪⚪⚪⚪
+// ⚪⚪⚪⚪⚪⚪⚪
+// ⚪⚪⚪⚪⚪⚪⚪
+// ⚪⚪⚪⚪⚪⚪⚪
+// ⚪⚪⚪⚪⚪⚪⚪
+// ⚪⚪⚪⚪⚪⚪⚪
+//
+// Open offer for g1vfhkyh6lta047h6lta047h6lta047h6l03vdhu, expires in 5m0s.
+//
+// **[Accept for 5 GNOT](/r/samcrew/connect4$help&func=Accept&.send=5000000ugnot&id=2)**
+//
+// [Cancel offer](/r/samcrew/connect4$help&func=Cancel&id=2) (creator)
+//
+// -----
+// # Post an offer
+//
+// [← Lobby](/r/samcrew/connect4)
+//
+// Pick a passphrase of 4+ random words, fresh for every offer, and keep it: once someone accepts you have 90s to reveal it, or you forfeit. Paste only its sha256 below, never the passphrase itself:
+//
+//     printf %s 'your pass phrase' | shasum -a 256
+//
+// <gno-form path="new">
+// <gno-input name="stake" type="text" placeholder="Stake in GNOT, e.g. 10 (min 1)" />
+// <gno-input name="validFor" type="number" placeholder="Minutes the offer stays open, 1-60 (default 15)" />
+// <gno-input name="opponent" type="text" placeholder="Opponent address (optional, leave empty for anyone)" />
+// <gno-input name="commitment" type="text" placeholder="sha256 of your passphrase (64 hex chars)" />
+// </gno-form>
+//
+// ## Ready
+//
+// Stake 12.5 GNOT, open to anyone for 10 min.
+//
+// **[Post offer for 12.5 GNOT](/r/samcrew/connect4$help&func=Offer&.send=12500000ugnot&commitment=5fb8d3d0c4f3b0fe7ab6ab1f7eda42c6e2de0c3c1d4a6c5e3d0f2f5d0e4f5a6b&opponent=&validFor=10)**
 //
 // -----
 // # Not found

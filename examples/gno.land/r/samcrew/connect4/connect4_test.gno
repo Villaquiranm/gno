@@ -135,6 +135,9 @@ func TestAcceptRejects(cur realm, t *testing.T) {
 	testing.SetRealm(testing.NewUserRealm(bob))
 	pay(stake - 1)
 	uassert.AbortsContains(t, cur, "must send exactly", func() { Accept(cross(cur), id) })
+	testing.SetRealm(testing.NewUserRealm(bob))
+	pay(stake + 1)
+	uassert.AbortsContains(t, cur, "must send exactly", func() { Accept(cross(cur), id) })
 	testing.SkipHeights(13) // 65s > 1 minute
 	testing.SetRealm(testing.NewUserRealm(bob))
 	pay(stake)

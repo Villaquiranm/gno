@@ -1,6 +1,9 @@
 package connect4
 
 import (
+	"chain/runtime"
+	"chain/runtime/unsafe"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -8,16 +11,19 @@ import (
 	"gno.land/p/moul/txlink/v0"
 )
 
-const gamePath = "/r/samcrew/connect4:game/"
-
-// Render serves "" (lobby and leaderboards) and "game/<id>".
-// Every string written here comes from the realm's own state (addresses,
-// numbers); path input is only ever parsed as an integer.
+// Render serves "" (lobby and leaderboards), "new" (offer form) and
+// "game/<id>" (one game with every action its state allows).
+// Everything written comes from realm state or from query values that have
+// been validated and re-formatted; raw path input is never echoed.
 func Render(path string) string {
-	if path == "" {
+	p, query, _ := strings.Cut(path, "?")
+	switch {
+	case p == "":
 		return renderLobby()
+	case p == "new":
+		return renderNew(query)
 	}
-	if s, ok := strings.CutPrefix(path, "game/"); ok {
+	if s, ok := strings.CutPrefix(p, "game/"); ok {
 		if id, err := strconv.Atoi(s); err == nil {
 			if g := get(id); g != nil {
 				return renderGame(g)
@@ -27,29 +33,36 @@ func Render(path string) string {
 	return "# Not found\n"
 }
 
+// pageURL links to one of this realm's Render pages. The realm path is read
+// at runtime, like txlink does, so links work wherever the realm is deployed.
+func pageURL(page string) string {
+	base := strings.TrimPrefix(unsafe.CurrentRealm().PkgPath(), runtime.ChainDomain())
+	if page == "" {
+		return base
+	}
+	return base + ":" + page
+}
+
+func gameLink(base string, id int) string {
+	return "[#" + strconv.Itoa(id) + "](" + base + ":game/" + strconv.Itoa(id) + ")"
+}
+
 func renderLobby() string {
 	now := time.Now()
+	base := pageURL("")
 	var open, live strings.Builder
 	active.Iterate("", "", func(_ string, v any) bool {
 		g := v.(*Game)
 		switch {
 		case g.Status == Open && now.Before(g.ExpiresAt):
-			who := "anyone"
-			if g.Opponent != "" {
-				who = g.Opponent.String()
-			}
-			accept := txlink.NewLink("Accept").
-				AddArgs("id", strconv.Itoa(g.ID)).
-				SetSend(strconv.FormatInt(g.Stake, 10) + denom).URL()
-			open.WriteString("| " + gnot(g.Stake) + " | " + g.Creator.String() + " | " + who +
-				" | " + remaining(g.ExpiresAt.Sub(now)) + " | [Accept](" + accept + ") |\n")
+			open.WriteString("| " + gameLink(base, g.ID) + " | " + gnot(g.Stake) + " | " + g.Creator.String() + " | " + openTo(g) +
+				" | " + remaining(g.ExpiresAt.Sub(now)) + " | [Accept](" + acceptURL(g) + ") |\n")
 		case g.Status == Playing:
 			turn := g.player(g.Turn).String()
 			if g.Turn == 0 {
 				turn = g.Creator.String() + " (reveal)"
 			}
-			live.WriteString("| [#" + strconv.Itoa(g.ID) + "](" + gamePath + strconv.Itoa(g.ID) + ") | " +
-				gnot(2*g.Stake) + " | " + turn + " | " + remaining(g.deadline().Sub(now)) + " |\n")
+			live.WriteString("| " + gameLink(base, g.ID) + " | " + gnot(2*g.Stake) + " | " + turn + " | " + remaining(g.deadline().Sub(now)) + " |\n")
 		}
 		return false
 	})
@@ -58,19 +71,12 @@ func renderLobby() string {
 	b.WriteString("# Connect 4\n\n")
 	b.WriteString("Both players stake the same amount; the winner takes the pot minus a " + gnot(fee) + " fee. " +
 		"90s per move: run out and you forfeit. If the first mover never moves, both stakes are refunded.\n\n")
-	b.WriteString("The first mover is picked by a secret passphrase you choose when posting an offer. " +
-		"Send its sha256 as `commitment`:\n\n" +
-		"    printf %s 'your pass phrase' | shasum -a 256\n\n" +
-		"Once your offer is accepted you have 90s to reveal the passphrase, or you forfeit. " +
-		"Make it unguessable (use 4+ random words) and use a fresh one for every offer: the commitment is public, so a weak or already-revealed passphrase lets others predict who moves first.\n\n")
-	b.WriteString("[Post an offer](" + txlink.NewLink("Offer").
-		AddArgs("opponent", "", "validFor", "15", "commitment", "").
-		SetSend(strconv.Itoa(minStake)+denom).URL() + ")\n\n")
+	b.WriteString("**[Post an offer](" + base + ":new)** · open a game below to play it\n\n")
 	b.WriteString("## Open offers\n\n")
 	if open.Len() == 0 {
 		b.WriteString("No open offers.\n\n")
 	} else {
-		b.WriteString("| Stake | Creator | For | Expires in | |\n|---|---|---|---|---|\n" + open.String() + "\n")
+		b.WriteString("| Game | Stake | Creator | For | Expires in | |\n|---|---|---|---|---|---|\n" + open.String() + "\n")
 	}
 	b.WriteString("## Live games\n\n")
 	if live.Len() == 0 {
@@ -85,12 +91,78 @@ func renderLobby() string {
 	return b.String()
 }
 
+// renderNew shows the offer form and, once submitted, a single Offer link
+// with the stake and every argument prefilled (gnoweb cannot edit .send).
+func renderNew(query string) string {
+	var b strings.Builder
+	b.WriteString("# Post an offer\n\n[← Lobby](" + pageURL("") + ")\n\n")
+	b.WriteString("Pick a passphrase of 4+ random words, fresh for every offer, and keep it: " +
+		"once someone accepts you have 90s to reveal it, or you forfeit. " +
+		"Paste only its sha256 below, never the passphrase itself:\n\n" +
+		"    printf %s 'your pass phrase' | shasum -a 256\n\n")
+	b.WriteString(`<gno-form path="new">
+<gno-input name="stake" type="text" placeholder="Stake in GNOT, e.g. 10 (min 1)" />
+<gno-input name="validFor" type="number" placeholder="Minutes the offer stays open, 1-60 (default 15)" />
+<gno-input name="opponent" type="text" placeholder="Opponent address (optional, leave empty for anyone)" />
+<gno-input name="commitment" type="text" placeholder="sha256 of your passphrase (64 hex chars)" />
+</gno-form>
+
+`)
+	if query == "" {
+		return b.String()
+	}
+
+	q, err := url.ParseQuery(query)
+	if err != nil {
+		return b.String() + "Could not read the form.\n"
+	}
+	// Parse first; the offer rules themselves live in validateOffer so this
+	// page and Offer cannot drift apart.
+	var errs []string
+	stake, ok := parseGNOT(q.Get("stake"))
+	if !ok {
+		errs = append(errs, "stake must be a GNOT amount with at most 6 decimals, e.g. 10 or 2.5")
+	}
+	validFor := 15
+	if v := q.Get("validFor"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			errs = append(errs, "validFor must be a whole number of minutes")
+		}
+		validFor = n
+	}
+	opponent := address(q.Get("opponent"))
+	commitment := q.Get("commitment")
+	if len(errs) == 0 {
+		errs = validateOffer(stake, validFor, opponent, commitment)
+	}
+	if len(errs) > 0 {
+		b.WriteString("**Fix the following:**\n\n")
+		for _, e := range errs {
+			b.WriteString("- " + e + "\n")
+		}
+		return b.String()
+	}
+
+	b.WriteString("## Ready\n\n")
+	who := "anyone"
+	if opponent != "" {
+		who = opponent.String()
+	}
+	b.WriteString("Stake " + gnot(stake) + ", open to " + who + " for " + strconv.Itoa(validFor) + " min.\n\n")
+	b.WriteString("**[Post offer for " + gnot(stake) + "](" + txlink.NewLink("Offer").
+		AddArgs("opponent", opponent.String(), "validFor", strconv.Itoa(validFor), "commitment", commitment).
+		SetSend(strconv.FormatInt(stake, 10)+denom).URL() + ")**\n")
+	return b.String()
+}
+
 func renderGame(g *Game) string {
+	now := time.Now()
 	var b strings.Builder
 	id := strconv.Itoa(g.ID)
-	b.WriteString("# Game #" + id + " — " + g.Status.String() + "\n\n")
+	b.WriteString("# Game #" + id + " — " + g.Status.String() + "\n\n[← Lobby](" + pageURL("") + ")\n\n")
 	b.WriteString("🔴 " + g.Creator.String() + "  \n🟡 " + orNone(g.Acceptor) + "  \n")
-	b.WriteString("Stake: " + gnot(g.Stake) + " each\n\n")
+	b.WriteString("Stake: " + gnot(g.Stake) + " each · fee " + gnot(g.Fee) + "\n\n")
 
 	b.WriteString("1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣  \n")
 	for r := rows - 1; r >= 0; r-- {
@@ -101,37 +173,88 @@ func renderGame(g *Game) string {
 	}
 	b.WriteString("\n")
 
-	switch {
-	case g.Status == Playing && g.Turn == 0:
-		left := g.deadline().Sub(time.Now())
-		b.WriteString("Waiting for creator to reveal\n\n")
-		if left > 0 {
-			b.WriteString("Time left: " + remaining(left) + "\n\n")
-			b.WriteString("[Reveal](" + txlink.NewLink("Reveal").AddArgs("id", id, "passphrase", "").URL() + ") (creator only)\n\n")
+	switch g.Status {
+	case Open:
+		cancel := "[Cancel offer](" + txlink.NewLink("Cancel").AddArgs("id", id).URL() + ")"
+		if now.Before(g.ExpiresAt) {
+			b.WriteString("Open offer for " + openTo(g) + ", expires in " + remaining(g.ExpiresAt.Sub(now)) + ".\n\n")
+			b.WriteString("**[Accept for " + gnot(g.Stake) + "](" + acceptURL(g) + ")**\n\n")
+			b.WriteString(cancel + " (creator)\n")
 		} else {
-			b.WriteString("Reveal clock ran out: [Claim timeout](" +
-				txlink.NewLink("ClaimTimeout").AddArgs("id", id).URL() + ")\n\n")
+			b.WriteString("This offer expired. Anyone can " + cancel + " to refund the creator.\n")
 		}
-		b.WriteString("[Resign](" + txlink.NewLink("Resign").AddArgs("id", id).URL() + ")\n")
-	case g.Status == Playing:
-		left := g.deadline().Sub(time.Now())
+	case Playing:
+		left := g.deadline().Sub(now)
+		claim := "Clock ran out: **[Claim timeout](" + txlink.NewLink("ClaimTimeout").AddArgs("id", id).URL() + ")**\n\n"
+		resign := "[Resign](" + txlink.NewLink("Resign").AddArgs("id", id).URL() + ")\n"
+		if g.Turn == 0 {
+			b.WriteString("Waiting for the creator to reveal the passphrase.\n\n")
+			if left > 0 {
+				b.WriteString("Time left: " + remaining(left) + "\n\n")
+				b.WriteString("**[Reveal](" + txlink.NewLink("Reveal").AddArgs("id", id, "passphrase", "").URL() + ")** (creator)\n\n")
+			} else {
+				b.WriteString(claim)
+			}
+			b.WriteString(resign)
+			break
+		}
 		b.WriteString("Turn: " + [...]string{"", "🔴", "🟡"}[g.Turn] + " " + g.player(g.Turn).String() + "\n\n")
 		if left > 0 {
-			b.WriteString("Time left: " + remaining(left) + "\n\n")
+			b.WriteString("Time left: " + remaining(left) + "\n\nPlay column: ")
 			for c := 1; c <= cols; c++ {
 				b.WriteString("[" + strconv.Itoa(c) + "](" +
 					txlink.NewLink("Play").AddArgs("id", id, "column", strconv.Itoa(c)).URL() + ") ")
 			}
 			b.WriteString("\n\n")
 		} else {
-			b.WriteString("Move clock ran out: [Claim timeout](" +
-				txlink.NewLink("ClaimTimeout").AddArgs("id", id).URL() + ")\n\n")
+			b.WriteString(claim)
 		}
-		b.WriteString("[Resign](" + txlink.NewLink("Resign").AddArgs("id", id).URL() + ")\n")
-	case g.Status == Won:
-		b.WriteString("Winner: " + g.Winner.String() + "\n")
+		b.WriteString(resign)
+	case Won:
+		b.WriteString("Winner: " + g.Winner.String() + ", paid " + gnot(2*g.Stake-g.Fee) + ".\n")
+	case Draw:
+		b.WriteString("Draw: both stakes refunded.\n")
+	case Void:
+		b.WriteString("Void: the first mover never moved, both stakes refunded.\n")
+	case Cancelled:
+		b.WriteString("Cancelled: stake refunded to the creator.\n")
 	}
 	return b.String()
+}
+
+func acceptURL(g *Game) string {
+	return txlink.NewLink("Accept").AddArgs("id", strconv.Itoa(g.ID)).
+		SetSend(strconv.FormatInt(g.Stake, 10) + denom).URL()
+}
+
+func digits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func openTo(g *Game) string {
+	if g.Opponent != "" {
+		return g.Opponent.String()
+	}
+	return "anyone"
+}
+
+// parseGNOT parses a decimal GNOT amount ("10", "2.5") into ugnot.
+func parseGNOT(s string) (int64, bool) {
+	whole, frac, _ := strings.Cut(s, ".")
+	if whole == "" || len(whole) > 12 || len(frac) > 6 {
+		return 0, false
+	}
+	if !digits(whole) || !digits(frac) {
+		return 0, false
+	}
+	w, _ := strconv.ParseInt(whole, 10, 64)
+	f, _ := strconv.ParseInt(frac+strings.Repeat("0", 6-len(frac)), 10, 64)
+	return w*1_000_000 + f, true
 }
 
 // leaderboard renders the top 10 players by score, skipping zero scores.
