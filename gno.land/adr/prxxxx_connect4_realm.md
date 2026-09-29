@@ -29,14 +29,17 @@ Two platform facts shape the design:
   rather than settling, keeping one settlement path.
 - **First mover by commit-reveal.** `Offer` takes `commitment`, the lowercase
   hex `sha256(passphrase)` (e.g. `printf %s 'pass phrase' | shasum -a 256`);
-  a commitment used by any earlier game is rejected. After `Accept` the game
+  commitments need not be unique. After `Accept` the game
   waits (`Turn = 0`, `Play` rejected) for the creator to `Reveal(id,
   passphrase)` within 90s; the first mover is the low bit of
   `sha256(passphrase|id|creator|acceptor)`. The acceptor cannot know the
   outcome before accepting and cannot re-roll after. The creator knows it
   before revealing, so not revealing in time forfeits: `ClaimTimeout` then
   pays the acceptor as a win. The passphrase must be unguessable, since the
-  commitment is public; the lobby says so ("use 4+ random words").
+  commitment is public, and fresh per offer, since a revealed passphrase
+  makes any later game using it predictable; the lobby says both. Reuse only
+  hurts the reusing creator, so it is not rejected (rejecting it also let
+  anyone block an offer by front-running its commitment).
 - **Fee** is a flat 0.1 GNOT (100,000 ugnot) per decisive game (one with a
   winner), adjustable by the owner and snapshotted per game at `Offer`, so a
   live game's terms never change. `Offer` requires stake > fee so a winner

@@ -57,7 +57,7 @@ func main(cur realm) {
 //
 //     printf %s 'your pass phrase' | shasum -a 256
 //
-// Once your offer is accepted you have 90s to reveal the passphrase, or you forfeit. Make it unguessable (use 4+ random words): the commitment is public, so a weak passphrase can be brute-forced.
+// Once your offer is accepted you have 90s to reveal the passphrase, or you forfeit. Make it unguessable (use 4+ random words) and use a fresh one for every offer: the commitment is public, so a weak or already-revealed passphrase lets others predict who moves first.
 //
 // [Post an offer]($help&func=Offer&.send=1000000ugnot&commitment=&opponent=&validFor=15)
 //

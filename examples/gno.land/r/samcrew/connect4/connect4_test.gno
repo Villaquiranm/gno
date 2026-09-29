@@ -22,7 +22,7 @@ var (
 )
 
 func reset() {
-	games, active, stats, commitments = avl.Tree{}, avl.Tree{}, avl.Tree{}, avl.Tree{}
+	games, active, stats = avl.Tree{}, avl.Tree{}, avl.Tree{}
 	nextID, fee, feesCollected = 0, 100_000, 0
 }
 
@@ -394,7 +394,7 @@ func TestCommitmentRejects(cur realm, t *testing.T) {
 	Offer(cross(cur), "", 10, good)
 	testing.SetRealm(testing.NewUserRealm(carol))
 	pay(stake)
-	uassert.AbortsContains(t, cur, "already used", func() { Offer(cross(cur), "", 10, good) })
+	Offer(cross(cur), "", 10, good) // the same commitment may be offered again
 }
 
 func TestPaymentsRequireUserCall(cur realm, t *testing.T) {

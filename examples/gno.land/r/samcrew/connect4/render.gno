@@ -62,7 +62,7 @@ func renderLobby() string {
 		"Send its sha256 as `commitment`:\n\n" +
 		"    printf %s 'your pass phrase' | shasum -a 256\n\n" +
 		"Once your offer is accepted you have 90s to reveal the passphrase, or you forfeit. " +
-		"Make it unguessable (use 4+ random words): the commitment is public, so a weak passphrase can be brute-forced.\n\n")
+		"Make it unguessable (use 4+ random words) and use a fresh one for every offer: the commitment is public, so a weak or already-revealed passphrase lets others predict who moves first.\n\n")
 	b.WriteString("[Post an offer](" + txlink.NewLink("Offer").
 		AddArgs("opponent", "", "validFor", "15", "commitment", "").
 		SetSend(strconv.Itoa(minStake)+denom).URL() + ")\n\n")

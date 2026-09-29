@@ -78,7 +78,6 @@ var (
 	games         avl.Tree // key(id) -> *Game
 	active        avl.Tree // key(id) -> *Game, only Open and Playing
 	stats         avl.Tree // address -> *Stats
-	commitments   avl.Tree // every commitment ever offered -> true
 	nextID        int
 	fee           int64 = 100_000 // ugnot per decisive game
 	feesCollected int64
@@ -109,10 +108,6 @@ func Offer(cur realm, opponent address, validFor int, commitment string) int {
 	if !isHexSHA256(commitment) {
 		panic("commitment must be 64 lowercase hex chars (sha256 of your passphrase)")
 	}
-	if commitments.Has(commitment) {
-		panic("commitment already used, pick a new passphrase")
-	}
-	commitments.Set(commitment, true)
 	nextID++
 	g := &Game{
 		ID:        nextID,
